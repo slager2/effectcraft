@@ -639,7 +639,7 @@ struct Parser<'a, 'i> {
     pattern_work_budget: usize,
     pattern_work_exceeded: bool,
     /// Parsed pattern content is viewport-dependent because lengths may be percentages.
-    pattern_cache: HashMap<(String, u64, u64), Option<Pattern>>,
+    pattern_cache: HashMap<(roxmltree::NodeId, u64, u64), Option<Pattern>>,
 }
 
 fn is_svg_ns(n: &roxmltree::Node) -> bool {
@@ -1004,7 +1004,7 @@ impl<'a, 'i> Parser<'a, 'i> {
     /// Resolve a local static pattern. The nearest chain member supplies each attribute;
     /// child content comes from the first member with element children.
     fn pattern(&mut self, id: &str) -> Option<Pattern> {
-        let key = (id.to_string(), self.vw.to_bits(), self.vh.to_bits());
+        let key = (self.ids.get(id)?.id(), self.vw.to_bits(), self.vh.to_bits());
         if let Some(pattern) = self.pattern_cache.get(&key) {
             return pattern.clone();
         }
@@ -1117,17 +1117,7 @@ impl<'a, 'i> Parser<'a, 'i> {
             isolated: true,
             knockout: false,
         };
-        Some(Pattern {
-            x,
-            y,
-            width,
-            height,
-            pattern_units: units,
-            content_units,
-            transform,
-            content: Arc::new(content),
-            fallback: None,
-        })
+        Some(Pattern { x, y, width, height, pattern_units: units, content_units, transform, content: Arc::new(content), fallback: None })
     }
 
     fn element_name(n: roxmltree::Node) -> String {
