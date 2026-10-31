@@ -79,8 +79,10 @@ fn shape_items(ids: &mut Ids, s: &effectcraft_svg::Shape, m: Affine) -> Vec<Prop
                 Some(build::shape_gradient_stroke(ids, radial, a, b, gradient_value(gr), width))
             }
             // Editable shape layers do not yet have a pattern paint operator. Keep the geometry
-            // and omit only this paint; SVG footage retains the correctly rasterised pattern.
-            Paint::Pattern(_) => None,
+            // and any retained fallback as solid paint; SVG footage retains the rasterised pattern.
+            Paint::Pattern(pattern) => pattern
+                .fallback
+                .map(|c| build::shape_stroke(ids, [c[0], c[1], c[2], c[3]], width)),
         };
         if let Some(mut g) = paint {
             set(&mut g, "opacity", Value::Scalar(st.opacity * 100.0));
@@ -105,8 +107,11 @@ fn shape_items(ids: &mut Ids, s: &effectcraft_svg::Shape, m: Affine) -> Vec<Prop
                 let (radial, a, b) = gradient_points(gr, m, bbox);
                 Some(build::shape_gradient_fill(ids, radial, a, b, gradient_value(gr)))
             }
-            // Pattern fills are preserved in rasterised SVG footage, but not editable vector paint.
-            Paint::Pattern(_) => None,
+            // Pattern artwork is preserved in rasterised SVG footage; editable shapes keep only
+            // any retained fallback as solid paint.
+            Paint::Pattern(pattern) => pattern
+                .fallback
+                .map(|c| build::shape_fill(ids, [c[0], c[1], c[2], c[3]])),
         };
         if let Some(mut g) = paint {
             set(&mut g, "opacity", Value::Scalar(s.fill_opacity * 100.0));
