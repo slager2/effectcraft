@@ -121,6 +121,43 @@ fn pattern_href_inherits_units_and_content_and_prefers_plain_href() {
 }
 
 #[test]
+fn pattern_content_inherits_styles_from_its_ancestors() {
+    let doc = parse(
+        br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2" fill="red">
+            <defs><pattern id="p" patternUnits="userSpaceOnUse" width="2" height="2">
+                <rect width="2" height="2"/>
+            </pattern></defs>
+            <rect width="2" height="2" fill="url(#p) blue"/>
+        </svg>"#,
+    )
+    .unwrap();
+    let img = rasterize(&doc, 2, 2, 1.0);
+    assert!(near(px(&img, 0, 0), [1.0, 0.0, 0.0, 1.0], 1e-3));
+}
+
+#[test]
+fn pattern_href_ignores_descriptive_children_when_inheriting_content() {
+    let doc = parse(
+        br##"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2">
+            <defs>
+                <pattern id="base" patternUnits="userSpaceOnUse" width="2" height="2">
+                    <rect width="2" height="2" fill="red"/>
+                </pattern>
+                <pattern id="derived" href="#base">
+                    <title>Documentation only</title>
+                    <desc>Still documentation only</desc>
+                    <metadata><author>Test</author></metadata>
+                </pattern>
+            </defs>
+            <rect width="2" height="2" fill="url(#derived)"/>
+        </svg>"##,
+    )
+    .unwrap();
+    let img = rasterize(&doc, 2, 2, 1.0);
+    assert!(near(px(&img, 0, 0), [1.0, 0.0, 0.0, 1.0], 1e-3));
+}
+
+#[test]
 fn cached_patterns_reuse_same_viewport_but_separate_percentage_sized_viewports() {
     let doc = parse(
         br##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="10" viewBox="0 0 120 10">
@@ -213,6 +250,22 @@ fn pattern_content_attribute_work_is_bounded_across_distinct_viewports() {
     let svg = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="1"><defs>
             <pattern id="p" data-repeat="{large_attribute}" patternUnits="userSpaceOnUse" width="50%" height="100%">
+                <rect width="1" height="1" fill="red"/>
+            </pattern></defs>{shapes}</svg>"##
+    );
+    let error = parse(svg.as_bytes()).unwrap_err();
+    assert!(error.to_string().contains("<pattern> references scans more than"), "{error}");
+}
+
+#[test]
+fn pattern_ancestor_attribute_work_is_bounded_across_distinct_viewports() {
+    let large_attribute = "x".repeat(2 * 1024 * 1024);
+    let shapes: String = (0..12)
+        .map(|index| format!(r##"<svg x="{index}" width="1" height="1" viewBox="0 0 {} 1"><rect width="1" height="1" fill="url(#p)"/></svg>"##, index + 1))
+        .collect();
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="1"><defs data-repeat="{large_attribute}">
+            <pattern id="p" patternUnits="userSpaceOnUse" width="50%" height="100%">
                 <rect width="1" height="1" fill="red"/>
             </pattern></defs>{shapes}</svg>"##
     );

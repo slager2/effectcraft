@@ -638,7 +638,7 @@ struct Parser<'a, 'i> {
     pattern_work: usize,
     pattern_work_budget: usize,
     pattern_work_exceeded: bool,
-    /// Parsed pattern content is viewport-dependent because lengths may be percentages.
+    /// Parsed pattern content is viewport-dependent because lengths may be percentages; the cache is bounded.
     pattern_cache: HashMap<(roxmltree::NodeId, u64, u64), Option<Pattern>>,
 }
 
@@ -1002,14 +1002,20 @@ impl<'a, 'i> Parser<'a, 'i> {
     }
 
     /// Resolve a local static pattern. The nearest chain member supplies each attribute;
-    /// child content comes from the first member with element children.
+    /// child content comes from the first member with non-descriptive element children.
     fn pattern(&mut self, id: &str) -> Option<Pattern> {
-        let key = (self.ids.get(id)?.id(), self.vw.to_bits(), self.vh.to_bits());
+        let target = *self.ids.get(id)?;
+        if target.tag_name().name() != "pattern" {
+            return None;
+        }
+        let key = (target.id(), self.vw.to_bits(), self.vh.to_bits());
         if let Some(pattern) = self.pattern_cache.get(&key) {
             return pattern.clone();
         }
         let pattern = self.parse_pattern(id);
-        self.pattern_cache.insert(key, pattern.clone());
+        if pattern.is_some() && self.pattern_cache.len() < MAX_PATTERN_CACHE_ENTRIES {
+            self.pattern_cache.insert(key, pattern.clone());
+        }
         pattern
     }
 
@@ -1048,7 +1054,17 @@ impl<'a, 'i> Parser<'a, 'i> {
 
         let attr = |name: &str| chain.iter().find_map(|node| node.attribute(name).map(str::to_string));
         let mut content_style = Style::default();
-        let (content_opacity, _) = self.cascade(first, &mut content_style);
+        let mut content_opacity = 1.0;
+        let ancestors: Vec<_> = first.ancestors().filter(|node| node.is_element()).collect();
+        for ancestor in ancestors.into_iter().rev() {
+            if ancestor.id() != first.id() && !self.charge_pattern_attributes(ancestor) {
+                return None;
+            }
+            let (opacity, _) = self.cascade(ancestor, &mut content_style);
+            if ancestor.id() == first.id() {
+                content_opacity = opacity;
+            }
+        }
         let font_size = content_style.font_size;
         let units = match attr("patternUnits").as_deref() {
             None | Some("objectBoundingBox") => PatternUnits::ObjectBoundingBox,
@@ -1091,7 +1107,10 @@ impl<'a, 'i> Parser<'a, 'i> {
             self.vw = 1.0;
             self.vh = 1.0;
         }
-        let source = chain.iter().copied().find(|node| node.children().any(|child| child.is_element()));
+        let source = chain
+            .iter()
+            .copied()
+            .find(|node| node.children().any(|child| child.is_element() && !matches!(child.tag_name().name(), "title" | "desc" | "metadata")));
         let mut children = Vec::new();
         if let Some(source) = source {
             for child in source.children() {
@@ -1447,6 +1466,8 @@ const MAX_EXPANDED_ELEMENTS: usize = 500_000;
 /// large pattern definition.
 const MAX_PATTERN_WORK_BYTES: usize = 256 * 1024 * 1024;
 const MIN_PATTERN_WORK_BYTES: usize = 8 * 1024 * 1024;
+/// Bound viewport-specific pattern results; uncached resolutions remain covered by the work budget.
+const MAX_PATTERN_CACHE_ENTRIES: usize = 256;
 
 /// The deepest element nesting of `text` (a quick scan that skips comments, CDATA, processing
 /// instructions, declarations and quoted attribute values).
