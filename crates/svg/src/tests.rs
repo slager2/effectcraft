@@ -121,6 +121,46 @@ fn pattern_href_inherits_units_and_content_and_prefers_plain_href() {
 }
 
 #[test]
+fn cached_patterns_reuse_same_viewport_but_separate_percentage_sized_viewports() {
+    let doc = parse(
+        br##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="10" viewBox="0 0 120 10">
+            <defs><pattern id="p" patternUnits="userSpaceOnUse" width="50%" height="100%">
+                <rect width="4" height="100%" fill="red"/>
+            </pattern></defs>
+            <svg width="40" height="10" viewBox="0 0 40 10">
+                <rect id="small-one" width="20" height="10" fill="url(#p) blue"/>
+                <rect id="small-two" x="20" width="20" height="10" fill="url(#p) green"/>
+            </svg>
+            <svg x="40" width="80" height="10" viewBox="0 0 80 10">
+                <rect id="large" width="80" height="10" fill="url(#p) yellow"/>
+            </svg>
+        </svg>"##,
+    )
+    .unwrap();
+    let shapes = doc.flatten();
+    let Some((_, _, small_one)) = shapes.iter().find(|(_, _, shape)| shape.name == "small-one") else { panic!("small-one expected") };
+    let Some(Paint::Pattern(small_one)) = small_one.fill.as_ref() else { panic!("small-one pattern expected") };
+    let Some((_, _, small_two)) = shapes.iter().find(|(_, _, shape)| shape.name == "small-two") else { panic!("small-two expected") };
+    let Some(Paint::Pattern(small_two)) = small_two.fill.as_ref() else { panic!("small-two pattern expected") };
+    let Some((_, _, large)) = shapes.iter().find(|(_, _, shape)| shape.name == "large") else { panic!("large expected") };
+    let Some(Paint::Pattern(large)) = large.fill.as_ref() else { panic!("large pattern expected") };
+    assert_eq!(small_one.width, 20.0);
+    assert_eq!(small_two.width, 20.0);
+    assert_eq!(large.width, 40.0);
+    assert_eq!(small_one.fallback, Some([0.0, 0.0, 1.0, 1.0]));
+    assert_eq!(small_two.fallback, Some([0.0, 128.0 / 255.0, 0.0, 1.0]));
+    assert_eq!(large.fallback, Some([1.0, 1.0, 0.0, 1.0]));
+
+    let img = rasterize(&doc, 120, 10, 1.0);
+    for x in [1, 21, 41, 81] {
+        assert!(near(px(&img, x, 5), [1.0, 0.0, 0.0, 1.0], 1e-3), "x={x}");
+    }
+    for x in [5, 25, 45, 85] {
+        assert_eq!(px(&img, x, 5)[3], 0.0, "x={x}");
+    }
+}
+
+#[test]
 fn bare_urls_and_hrefs_do_not_resolve_as_local_pattern_ids() {
     let doc = parse(
         br##"<svg xmlns="http://www.w3.org/2000/svg" width="6" height="2">
@@ -163,12 +203,14 @@ fn empty_valid_pattern_is_transparent_instead_of_using_its_fallback() {
 }
 
 #[test]
-fn pattern_content_attribute_work_is_bounded_across_references() {
+fn pattern_content_attribute_work_is_bounded_across_distinct_viewports() {
     let large_attribute = "x".repeat(2 * 1024 * 1024);
-    let shapes: String = (0..12).map(|index| format!(r##"<rect x="{index}" width="1" height="1" fill="url(#p)"/>"##)).collect();
+    let shapes: String = (0..12)
+        .map(|index| format!(r##"<svg x="{index}" width="1" height="1" viewBox="0 0 {} 1"><rect width="1" height="1" fill="url(#p)"/></svg>"##, index + 1))
+        .collect();
     let svg = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="1"><defs>
-            <pattern id="p" data-repeat="{large_attribute}" patternUnits="userSpaceOnUse" width="1" height="1">
+            <pattern id="p" data-repeat="{large_attribute}" patternUnits="userSpaceOnUse" width="50%" height="100%">
                 <rect width="1" height="1" fill="red"/>
             </pattern></defs>{shapes}</svg>"##
     );
