@@ -527,6 +527,7 @@ fn paint(dst: &mut Image, cov: &Mask, p: &Paint, opacity: f32, m: Affine, bbox: 
     paint_shader(dst, cov, &shader, opacity);
 }
 
+/// Render a pattern tile once for this paint operation, then sample it repeatedly over the mask.
 fn paint_pattern(dst: &mut Image, cov: &Mask, pattern: &Pattern, opacity: f32, m: Affine, bbox: kurbo::Rect, budget: &mut SurfaceBudget) {
     let fallback = || pattern.fallback.map(|c| Shader::Solid(c.map(|v| v as f32)));
     let fallback_paint = |dst: &mut Image| {
@@ -607,6 +608,7 @@ fn paint_pattern(dst: &mut Image, cov: &Mask, pattern: &Pattern, opacity: f32, m
     budget.release(&tile);
 }
 
+/// Composite a shader through a coverage mask using premultiplied destination pixels.
 fn paint_shader(dst: &mut Image, cov: &Mask, shader: &Shader<'_>, opacity: f32) {
     let w = dst.width as usize;
     if w == 0 {

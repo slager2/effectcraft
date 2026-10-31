@@ -11,7 +11,7 @@ mod color;
 mod pathdata;
 mod raster;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub use color::parse_color;
 pub use kurbo::{Affine, BezPath};
@@ -75,7 +75,9 @@ pub enum Spread {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PatternUnits {
+    /// Coordinates are fractions of the painted shape's bounding box.
     ObjectBoundingBox,
+    /// Coordinates are expressed in the current user space.
     UserSpaceOnUse,
 }
 
@@ -104,10 +106,14 @@ pub struct Pattern {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// Coordinate system used for the tile origin and size.
     pub pattern_units: PatternUnits,
+    /// Coordinate system used by the tile's child shapes.
     pub content_units: PatternUnits,
+    /// Transform applied to the repeating tile.
     pub transform: Affine,
-    pub content: Group,
+    /// Immutable tile content shared by every use of the resolved pattern.
+    pub content: Arc<Group>,
     /// The fallback from `url(#id) fallback`, used if the target bbox or tile is invalid.
     pub fallback: Option<[f64; 4]>,
 }
@@ -849,6 +855,7 @@ impl<'a, 'i> Parser<'a, 'i> {
         (num("opacity").unwrap_or(1.0).clamp(0.0, 1.0), display)
     }
 
+    /// Resolve a paint reference, retaining a per-reference fallback for patterns.
     fn resolve_paint(&mut self, p: &PaintRef, st: &Style) -> Option<(Paint, f64)> {
         if self.in_pattern_content && matches!(p, PaintRef::Url(..)) {
             self.invalid_pattern_content = true;
@@ -875,6 +882,7 @@ impl<'a, 'i> Parser<'a, 'i> {
         }
     }
 
+    /// Read a local `href` or namespaced `xlink:href` value from an SVG element.
     fn href_value(n: roxmltree::Node<'a, 'i>) -> Option<String> {
         const XLINK: &str = "http://www.w3.org/1999/xlink";
         let href = n
@@ -965,6 +973,7 @@ impl<'a, 'i> Parser<'a, 'i> {
         Some(Gradient { kind, stops, bbox_units, transform, spread })
     }
 
+    /// Parse a pattern length using the coordinate system selected by its units attribute.
     fn pattern_length(&self, value: &str, axis: char, font: f64, units: PatternUnits) -> Option<f64> {
         let value = value.trim();
         let length = match units {
@@ -1004,6 +1013,7 @@ impl<'a, 'i> Parser<'a, 'i> {
         pattern
     }
 
+    /// Parse one pattern and account for all work done while resolving its inheritance chain.
     fn parse_pattern(&mut self, id: &str) -> Option<Pattern> {
         const MAX_PATTERN_HREF_DEPTH: usize = 16;
         let first = *self.ids.get(id)?;
@@ -1107,7 +1117,17 @@ impl<'a, 'i> Parser<'a, 'i> {
             isolated: true,
             knockout: false,
         };
-        Some(Pattern { x, y, width, height, pattern_units: units, content_units, transform, content, fallback: None })
+        Some(Pattern {
+            x,
+            y,
+            width,
+            height,
+            pattern_units: units,
+            content_units,
+            transform,
+            content: Arc::new(content),
+            fallback: None,
+        })
     }
 
     fn element_name(n: roxmltree::Node) -> String {

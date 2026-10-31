@@ -150,6 +150,8 @@ fn cached_patterns_reuse_same_viewport_but_separate_percentage_sized_viewports()
     assert_eq!(small_one.fallback, Some([0.0, 0.0, 1.0, 1.0]));
     assert_eq!(small_two.fallback, Some([0.0, 128.0 / 255.0, 0.0, 1.0]));
     assert_eq!(large.fallback, Some([1.0, 1.0, 0.0, 1.0]));
+    assert!(std::sync::Arc::ptr_eq(&small_one.content, &small_two.content));
+    assert!(!std::sync::Arc::ptr_eq(&small_one.content, &large.content));
 
     let img = rasterize(&doc, 120, 10, 1.0);
     for x in [1, 21, 41, 81] {
